@@ -24,8 +24,8 @@ def test_the_default_arm_clears_the_engine_rather_than_leaving_it() -> None:
     The old runner spawned a process per measurement and could not have this
     bug; the docstring saying so outlived the runner it described.
     """
-    _engine('duckdb')
-    assert os.environ.get('LPSPEC_ENGINE') == 'duckdb'
+    _engine('polars')
+    assert os.environ.get('LPSPEC_ENGINE') == 'polars'
 
     _engine(None)
     assert 'LPSPEC_ENGINE' not in os.environ, (

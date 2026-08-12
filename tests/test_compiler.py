@@ -44,7 +44,7 @@ import pytest
 
 from lpspec.errors import LanguageError
 from lpspec.relational import plan
-from lpspec.relational.engines.polars.binding import BoundSources
+from lpspec.relational.binding import BoundSources
 from lpspec.relational.engines.polars.compiler import PolarsCompiler
 
 PROGRAM = plan.Program(

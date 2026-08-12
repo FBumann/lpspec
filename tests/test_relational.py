@@ -485,15 +485,19 @@ def test_a_dictionary_encoded_source_column_binds_like_a_plain_one():
     assert from_encoded == pytest.approx(from_plain), 'the encoding changed the model'
 
 
-def test_a_string_dimension_is_enum_encoded_up_to_the_read_back():
-    """A string dim is an ``Enum`` over its labels in declaration order for the
-    whole build — and plain ``String`` the moment it is handed back.
+def test_a_string_dimension_leaves_the_read_back_as_string():
+    """A string dim is plain ``String`` the moment it is handed back.
 
-    The encoding buys the joins and the label frames and every gram of that is
-    internal. What a caller gets is something they join against their own data,
-    which an ``Enum`` refuses. Declaration order survives the cast because it
-    was never the dtype carrying it: it is the row order, and `to_pandas` puts
-    the ordered categories back for the bridge out.
+    What a caller gets is something they join against their own data, which an
+    ``Enum`` refuses. Declaration order survives because it was never the dtype
+    carrying it: it is the row order, and `to_pandas` puts the ordered
+    categories back for the bridge out.
+
+    **Asked of whichever engine is running.** How a dim is encoded *inside* a
+    build is that engine's business — polars holds an `Enum` and casts on the
+    way out, duckdb holds ``VARCHAR`` throughout — but what leaves is a
+    contract, and `test_engine_parity` compares built models rather than
+    returned dtypes, so nothing else here would catch the two disagreeing.
     """
     model = {
         'dimensions': {'node': {'dtype': 'str', 'values': ['c', 'a', 'b']}},
@@ -503,15 +507,29 @@ def test_a_string_dimension_is_enum_encoded_up_to_the_read_back():
         'objectives': {'o': {'sense': 'minimize', 'expression': 'sum(x, over=node)'}},
     }
     cap = pl.DataFrame({'node': ['a', 'b', 'c'], 'value': [1.0, 2.0, 3.0]})
-    declared = pl.Enum(['c', 'a', 'b'])
 
     with lps.build(model, {'cap': cap}) as ex:
-        assert ex._variables['x'].collect_schema()['node'] == declared
         primal = ex.solve().primal('x')
 
     assert primal.schema['node'] == pl.String, 'what leaves is what a caller can join against'
     assert primal['node'].to_list() == ['c', 'a', 'b'], 'read-back follows label order, not source order'
     assert primal.join(cap, on='node').height == 3, "the caller's own frame is String, and it joins"
+
+
+def test_a_string_dimension_is_enum_encoded_inside_the_build(engine_internals):
+    """The encoding buys the joins and the label frames, and every gram of that
+    is internal — so it is asserted where it is done, not where it is undone."""
+    model = {
+        'dimensions': {'node': {'dtype': 'str', 'values': ['c', 'a', 'b']}},
+        'parameters': {'cap': {'dims': ['node']}},
+        'variables': {'x': {'foreach': ['node'], 'bounds': {'lower': 0, 'upper': 'cap'}}},
+        'constraints': {'k': {'foreach': ['node'], 'expression': 'x >= cap'}},
+        'objectives': {'o': {'sense': 'minimize', 'expression': 'sum(x, over=node)'}},
+    }
+    cap = pl.DataFrame({'node': ['a', 'b', 'c'], 'value': [1.0, 2.0, 3.0]})
+
+    with lps.build(model, {'cap': cap}) as ex:
+        assert ex._variables['x'].collect_schema()['node'] == pl.Enum(['c', 'a', 'b'])
 
 
 def test_a_where_orders_string_labels_bytewise_not_by_declaration():
@@ -1604,7 +1622,7 @@ FLAT_MODEL = {
 }
 
 
-def test_a_bound_dense_over_the_product_is_attached_by_position_not_joined():
+def test_a_bound_dense_over_the_product_is_attached_by_position_not_joined(engine_internals):
     """The shape xarray gets for free: position *is* the coordinate.
 
     `avail` spans exactly `p`'s foreach and has a row per coordinate, so the
@@ -1626,7 +1644,7 @@ def test_a_bound_dense_over_the_product_is_attached_by_position_not_joined():
         )
 
 
-def test_the_positional_attach_sorts_rather_than_trusting_the_source_order():
+def test_the_positional_attach_sorts_rather_than_trusting_the_source_order(engine_internals):
     """The same numbers arriving shuffled must give the same model.
 
     A parameter's rows come in whatever order its source had. Attaching without
@@ -1643,7 +1661,7 @@ def test_the_positional_attach_sorts_rather_than_trusting_the_source_order():
         assert got == pytest.approx([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), 'each coordinate got its own bound'
 
 
-def test_a_mask_or_a_sparse_bound_keeps_the_join():
+def test_a_mask_or_a_sparse_bound_keeps_the_join(engine_internals):
     """Both ways position stops meaning the coordinate, refused by the gate.
 
     A `where` makes the label frame a subset of the product, and a parameter

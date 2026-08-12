@@ -32,6 +32,9 @@ from lpspec.language.validation import load_model
 if TYPE_CHECKING:
     from lpspec.language.model import Model
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 EXAMPLES_DIR = Path(__file__).parent.parent / 'examples'
 
 #: The dispatch model as a dict, for tests that need to mutate a declaration
@@ -58,6 +61,63 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help='rewrite committed golden output (examples/*.out) from this run instead of asserting on it',
     )
+    parser.addoption(
+        '--engine',
+        default=None,
+        help='run the whole suite on this engine instead of the default. Every test that reaches '
+        '`lps.build` is then a test of that engine, which is what makes a second one a lane '
+        'rather than a demo.',
+    )
+
+
+@pytest.fixture
+def engine_internals(pytestconfig: pytest.Config) -> None:
+    """Skip unless this run is on the polars engine.
+
+    For the few tests that reach *inside* an engine — its compiler, its label
+    strategies — rather than through `lps.build`. Another engine does not have
+    to share those internals to be correct; it has to produce the same model,
+    which every other test here already checks against the same YAML.
+
+    `--engine` unset means `DEFAULT_ENGINE`, not polars, so it is resolved
+    before the comparison: reading it as polars would run these against
+    whichever engine the default names.
+    """
+    from lpspec.relational import engines
+
+    name = pytestconfig.getoption('--engine') or engines.DEFAULT_ENGINE
+    if name != 'polars':
+        pytest.skip(f'reaches polars-engine internals; this run is on {name!r}')
+
+
+@pytest.fixture(autouse=True, scope='session')
+def _engine_under_test(pytestconfig: pytest.Config) -> Iterator[None]:
+    """Point `lps.build`'s default at `--engine`, for the whole session.
+
+    Through `LPSPEC_ENGINE`, the same switch a user has — so this fixture
+    exercises the documented mechanism rather than a private hook only the
+    tests know about. Setting the default rather than threading a parameter
+    through every test: the claim being checked is that *the suite* passes on
+    another engine, and a parameter each test opts into would only check the
+    ones that remembered.
+    """
+    name = pytestconfig.getoption('--engine')
+    if name is None:
+        yield
+        return
+    import os
+
+    from lpspec.relational import engines
+
+    previous = os.environ.get(engines.ENV_VAR)
+    os.environ[engines.ENV_VAR] = name
+    try:
+        yield
+    finally:
+        if previous is None:
+            del os.environ[engines.ENV_VAR]
+        else:
+            os.environ[engines.ENV_VAR] = previous
 
 
 # ---------------------------------------------------------------------------

@@ -71,14 +71,29 @@ jobs:
             printf 'Running everything. Live files:\n%s\n' "$live"
           fi
 
-      # Current dependencies, dev group: lint, format, types, suite.
+      # Current dependencies, dev group *and every extra the package ships code
+      # for*: `pyrefly` treats `missing-import` as an error, so an optional
+      # dependency absent here is a type-check failure on code that is in the
+      # wheel. Both engines come in with the project itself — duckdb and pyarrow
+      # are runtime dependencies — so `dev` is the whole list.
       - run: uv sync --group dev
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
       # Only meaningful here, not below: missing-import is an error, and the
       # linopy lane imports linopy/xarray, which a bare install deliberately lacks.
       - run: uv run --no-sync pyrefly check --output-format=github
+      # The default engine, unflagged — so the pass nobody has to remember to
+      # run is the one measuring what a caller gets.
       - run: uv run --no-sync pytest -q
+
+      # The whole suite again, on the other engine. Not a subset and not a
+      # separate parity file: the claim `LPSPEC_ENGINE=polars` makes is that a
+      # caller can choose it and nothing else changes, and only running every
+      # test that reaches `lps.build` checks that. It costs ~25s.
+      #
+      # `test_engine_parity.py` asserts the switch actually took effect, so
+      # this cannot silently degrade into a second run of the default engine.
+      - run: uv run --no-sync pytest -q --engine polars
 
       # The site, built strictly: `strict: true` in mkdocs.yml turns every
       # warning into a failure, so this gate catches a dead cross-link, a model
@@ -131,10 +146,20 @@ jobs:
           done
 
       # Re-install the same checkout into the shipped shape, at the declared
-      # floors. Two claims in one install:
-      #   1. the relational product runs with no linopy, xarray, pandas or
-      #      pyarrow on disk — polars is the only dataframe library it needs;
-      #   2. the lower bounds in pyproject.toml are real. Without this they are
+      # floors. Three claims in one install:
+      #   1. the relational product runs with no linopy, xarray or pandas on
+      #      disk. pyarrow *is* there — the default engine hands frames over
+      #      through Arrow and depends on it — and pandas is what that does not
+      #      imply. This is the only honest place to check that half: pyarrow
+      #      imports pandas whenever pandas is installed, and polars imports it
+      #      on the way up, so hiding it in-process does not work. Here there
+      #      simply is no pandas;
+      #   2. the runtime dependency set is **complete**, which was false once: a
+      #      declaration carrying `duckdb` and not `pyarrow` installs cleanly and
+      #      then fails on the first build. No test in the suite can catch that,
+      #      because the dev environment has pyarrow via the `[linopy]` extra —
+      #      only an install without it can;
+      #   3. the lower bounds in pyproject.toml are real. Without this they are
       #      decoration, and decoration is how they go wrong: `>=1.0` on duckdb
       #      once sat five minor versions below the first release carrying the
       #      method the sink called, and nothing noticed until this job existed.
@@ -158,6 +183,10 @@ jobs:
       # it, so `lowest-direct` there tries a source build and fails. Raise a
       # floor when the code relies on that version's behaviour, not to chase
       # a newer interpreter — see the early-development note in RELEASING.md.
+      # The suite runs twice here, once per engine, and both are cheap once the
+      # install is paid for. Running only the default would leave the polars
+      # engine unexercised at the floors, and its floor — polars itself — is the
+      # one the linopy extra was silently dragging upward.
       - name: bare install, at the dependency floors
         if: steps.scope.outputs.inert != 'true'
         run: |
@@ -166,4 +195,25 @@ jobs:
           uv pip install --resolution lowest-direct .
           uv pip install pytest
           uv run --no-sync python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('linopy') is not None)"
+          uv run --no-sync python -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('pandas') is not None)"
           uv run --no-sync pytest -q
+          uv run --no-sync pytest -q --engine polars
+
+      # A solve on the default engine, in that same pandas-free environment,
+      # asserting pandas stayed unimported rather than merely uninstalled. The
+      # step above proves it is not on disk; this proves the engine does not go
+      # looking, which is the claim that would survive somebody installing it
+      # for an unrelated reason.
+      - name: the default engine reaches for no pandas
+        run: |
+          uv run --no-sync python -c "
+          import polars as pl, lpspec as lps
+          src = {'p_max': pl.DataFrame({'generator': ['wind'], 'value': [10.0]}),
+                 'cost': pl.DataFrame({'generator': ['wind'], 'value': [1.0]}),
+                 'load': pl.DataFrame({'snapshot': [0], 'value': [5.0]})}
+          sol = lps.solve('examples/dispatch.yaml', src)
+          assert sol.objective == 5.0, sol.objective
+          assert isinstance(sol.primal('p'), pl.DataFrame)
+          import sys; assert 'pandas' not in sys.modules
+          print('default engine OK, pandas-free')
+          "

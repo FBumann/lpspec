@@ -14,6 +14,11 @@ name: CodSpeed
 # it. One lane and the small rung: this measures lpspec against itself, and the
 # cross-lane comparison is the published ladder's job.
 #
+# **`--arms lpspec` is the default engine, whichever that is.** The harness maps
+# that arm to `None` rather than to an engine name, so this job measures the
+# shipped default and needs no flag naming it. Nothing installs specially
+# either: both engines are runtime dependencies, so `uv sync` brings them.
+#
 # What it buys over bench.yml, which already gates on memory: **the baseline**.
 # bench.yml can only compare against a base it checks out and measures itself,
 # which is two passes and the reason it has to be asked for with a label. This
@@ -175,7 +180,8 @@ jobs:
       # `--no-default-groups` is the cost control: `dev` resolves linopy from a
       # git branch, and nothing measured here builds a linopy model. The
       # codspeed group declares the parquet writer the data generator needs, so
-      # dropping the default groups costs nothing this job uses.
+      # dropping the default groups costs nothing this job uses. The engine
+      # under measurement comes in with the project, not with a group.
       - run: uv sync --no-default-groups --group codspeed
 
       # No data-warming step, unlike bench.yml. Generation happens once inside

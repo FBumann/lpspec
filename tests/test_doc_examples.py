@@ -53,7 +53,8 @@ import yaml
 import lpspec as lps
 from lpspec.language.model import Model
 from lpspec.language.validation import load_model
-from lpspec.relational.engines.polars.executor import PolarsExecutor, Result
+from lpspec.relational.engines.polars.executor import PolarsExecutor
+from lpspec.relational.result import Result
 
 try:
     from lpspec import linopy as linopy_lane

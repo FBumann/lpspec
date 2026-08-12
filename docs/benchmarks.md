@@ -66,11 +66,19 @@ isolated pass, so a peak here is the first call in a fresh process — which is
 what this page describes and what a caller building one model pays. Peaks taken
 under 0.4 are a different quantity wearing the same name, and are not mixed in.
 
-*This lane replaced a duckdb engine, and the three-way comparison that decided
-it — speed against a settable memory ceiling — is in
-[#189](https://github.com/fluxopt/lpspec/pull/189) and in git. It is not
-re-measured here: duckdb is no longer a dependency, and a column nobody can
-re-run is a claim with a shelf life.*
+**The `lpspec` column here is the polars engine, not the default one.** The run
+that produced it predates the current default, and a table says what the run
+that produced it did. On duckdb the numbers are worse, and
+[bench/duckdb-spike.md](https://github.com/fluxopt/lpspec/blob/main/bench/duckdb-spike.md)
+says by how much: `duckdb ÷ polars` at the `l` rung is 1.6–3.1x on build,
+1.19–2.84x on wall and 0.90–1.84x on peak. Re-taking this page with
+`--arms lpspec linopy` on an idle machine puts the default engine back in the
+column.
+
+*This lane replaced an out-of-tree duckdb engine, and the three-way comparison
+that decided it — speed against a settable memory ceiling — is in
+[#189](https://github.com/fluxopt/lpspec/pull/189) and in git. The in-tree
+engine is a port of it and has never reproduced its memory advantage.*
 
 ## Results
 

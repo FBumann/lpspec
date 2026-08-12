@@ -95,6 +95,22 @@ than a rival dialect.
 Not measured, deliberately: solve time (that is HiGHS, identical either way, and
 it would swamp the build), and anything about expressiveness.
 
+### The `polars` arm
+
+`--arms lpspec polars` times the same lane on the other engine. It is not a
+third code path: the arm runs the `lpspec` arm with `LPSPEC_ENGINE` set for
+that child, which is the switch a caller has — so the harness measures the
+shipped mechanism rather than one only it knows about. One process per
+measurement is what makes an environment variable the right tool here; there is
+nothing to reset afterwards.
+
+`lpspec` is the *default* engine, so the plain arm measures duckdb and the
+named arm measures polars: the one that has to be asked for is the one not
+shipped by default. Nothing installs separately — both engines are runtime
+dependencies. The findings are in [duckdb-spike.md](duckdb-spike.md), which
+labels its columns by engine name rather than by arm so that a ratio there
+survives the default moving.
+
 ## Why it is built this way
 
 **One process per measurement.** Peak RSS is a property of a process: a second

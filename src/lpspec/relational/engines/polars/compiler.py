@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from polars._typing import JoinStrategy, MaintainOrderJoin
 
-    from lpspec.relational.engines.polars.binding import BoundSources
+    from lpspec.relational.binding import BoundSources
 
 
 #: Scratch columns. The spaces make them unrepresentable as declared names, so
@@ -192,9 +192,7 @@ class PolarsCompiler:
         flat mapping, because the language has one flat namespace and the two
         cannot collide.
         """
-        named: dict[str, tuple[str, ...]] = {p.name: p.dims for p in self.program.parameters}
-        named.update({v.name: v.dims for v in self.program.variables})
-        return named
+        return plan.name_dims(self.program)
 
     def frame(self, dims: tuple[str, ...], where: plan.Predicate | None) -> pl.LazyFrame:
         """The masked coordinate product over *dims*.
@@ -224,7 +222,7 @@ class PolarsCompiler:
         carrier, condition = self._predicate(out, where, dims)
         if carrier is out:
             return out.filter(_falsy_if_null(condition))
-        touched = predicate_dims(where, self.name_dims)
+        touched = plan.predicate_dims(where, self.name_dims)
         on = tuple(d for d in dims if d in touched)
         if on and len(on) < len(dims) and touched <= set(dims):
             keyed, keyed_condition = self._predicate(self._coordinate_product(on), where, on)
@@ -831,41 +829,6 @@ class PolarsCompiler:
 def ordinal(dim: str) -> str:
     """The frame column carrying *dim*'s position in its declared order."""
     return f'__ord {dim}__'
-
-
-def predicate_dims(where: plan.Predicate, name_dims: Mapping[str, tuple[str, ...]]) -> frozenset[str]:
-    """Which dims *where* reads.
-
-    A parameter is read through its own dims, a variable through its foreach,
-    a dimension comparison through the dim it names, and a constant reads
-    nothing.
-
-    Raises:
-        LanguageError: A predicate this function does not know. One that
-            forgot to answer here would silently mis-restrict or mislabel a
-            model — :meth:`PolarsCompiler.frame`'s semi-join and the label
-            planner's factored prefix both read this.
-    """
-    if isinstance(where, plan.BooleanConstant):
-        return frozenset()
-    if isinstance(where, plan.DimensionComparison):
-        return frozenset({where.dimension})
-    if isinstance(where, (plan.ParameterComparison, plan.ParameterDefined)):
-        dims = frozenset(name_dims.get(where.parameter, ()))
-        value = getattr(where, 'value', None)
-        if isinstance(value, str) and value in name_dims:
-            dims |= frozenset(name_dims[value])
-        return dims
-    if isinstance(where, plan.VariableDefined):
-        return frozenset(name_dims.get(where.variable, ()))
-    if isinstance(where, (plan.And, plan.Or)):
-        return predicate_dims(where.left, name_dims) | predicate_dims(where.right, name_dims)
-    if isinstance(where, plan.Not):
-        return predicate_dims(where.operand, name_dims)
-    raise LanguageError(
-        f'{type(where).__name__} is a predicate the mask planner does not know how to read; '
-        'add it to predicate_dims before using it in a where'
-    )
 
 
 def _certain_parameters(pred: plan.Predicate) -> frozenset[str]:

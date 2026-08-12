@@ -12,6 +12,7 @@ dataframe library beyond the engine's own. The tests that exercise the bridges
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -72,19 +73,23 @@ def test_parquet_path_sources(dispatch_yaml, dispatch_frame_inputs, tmp_path):
 def test_runtime_is_linopy_free(dispatch_yaml):
     """Import the package, build and solve on Arrow sources — linopy never loads.
 
-    pandas and pyarrow are on the list too, and that is newer than it looks:
-    on the duckdb engine they could not be, because duckdb imported pandas
-    opportunistically when registering any Python object, so "not in
-    ``sys.modules``" was not a claim this package could keep. polars imports
-    neither until asked, so the stronger claim is now available and is pinned
-    here — a bridge out (``to_pandas``, ``to_dataarray``) must stay a bridge
-    and never become something the build path walks over on its own.
+    The claim every engine keeps, which is why the subprocess below is pinned
+    to the default rather than following ``--engine``: neither lane's shim is
+    ever on the build path, whichever engine walks it.
+
+    pandas is deliberately not on the list. The default engine reaches duckdb's
+    dataframe interop, which imports pyarrow, and `pyarrow._dataset` imports
+    pandas where pandas exists — so the narrower "no dataframe library but
+    polars" claim belongs to the *polars* engine and is stated in
+    :func:`test_the_polars_engine_needs_neither_pandas_nor_pyarrow`. It is worth
+    having in both places: a bridge out (``to_pandas``, ``to_dataarray``) has to
+    stay a bridge somewhere it can be checked.
 
     Distinct from, and weaker than, the claim that they need not be
     *installed*: the bare-install CI job is what proves that, running this
-    suite with no dataframe library beyond polars present at all.
+    suite with neither linopy nor pandas present at all.
     """
-    absent = ('linopy', 'xarray', 'pandas', 'pyarrow')
+    absent = ('linopy', 'xarray')
     script = textwrap.dedent(f"""
         import sys
         assert "linopy" not in sys.modules
@@ -114,9 +119,73 @@ def test_runtime_is_linopy_free(dispatch_yaml):
             assert lib not in sys.modules, f"solve pulled in {{lib}}"
         print("LINOPY_FREE_OK")
     """)
-    out = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=300)
+    # the default engine, whatever the session is running on: an env var that
+    # leaked in would silently turn this into a claim about a different engine
+    env = {k: v for k, v in os.environ.items() if k != 'LPSPEC_ENGINE'}
+    out = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=300, env=env)
     assert out.returncode == 0, out.stderr
     assert 'LINOPY_FREE_OK' in out.stdout
+
+
+#: The dispatch build both engine-footprint tests below run, as a script. One
+#: model, one `_tables()`, and a line saying what got imported — the only thing
+#: that differs between the two is which engine `LPSPEC_ENGINE` names, which is
+#: exactly the comparison being made.
+_FOOTPRINT = """
+    import sys
+
+    import polars as pl
+    import lpspec as lps
+    with lps.build({model!r}, {{
+        "p_max": pl.DataFrame({{"generator": ["wind"], "value": [100.0]}}),
+        "cost": pl.DataFrame({{"generator": ["wind"], "value": [1.0]}}),
+        "load": pl.DataFrame({{"snapshot": [0], "value": [80.0]}}),
+    }}, coords={{"snapshot": range(1)}}) as ex:
+        ex._tables()
+    print("IMPORTED", sorted(m for m in ("pandas", "pyarrow") if m in sys.modules))
+"""
+
+
+def _footprint(dispatch_yaml, engine: str) -> str:
+    """Which of pandas/pyarrow *engine* pulled in, building in a clean process."""
+    script = textwrap.dedent(_FOOTPRINT.format(model=str(dispatch_yaml)))
+    env = {**os.environ, 'LPSPEC_ENGINE': engine}
+    out = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=300, env=env)
+    assert out.returncode == 0, out.stderr
+    return out.stdout
+
+
+def test_the_default_engine_needs_arrow(dispatch_yaml):
+    """Why pyarrow is a runtime dependency and not an afterthought.
+
+    duckdb and polars hand frames to each other through Arrow, so pyarrow is a
+    requirement of the default engine rather than an accident. A declaration
+    carrying only `duckdb` installs cleanly and then fails on the first build,
+    which is the failure this pins.
+
+    **pandas is not implied**, and that half cannot be checked here: pyarrow
+    imports pandas whenever pandas is installed, and this environment has it
+    for the linopy lane. Hiding it in-process does not work either — polars
+    imports pandas itself on the way up. The bare-install CI job is what proves
+    it, by not having pandas there at all.
+    """
+    assert 'pyarrow' in _footprint(dispatch_yaml, 'duckdb'), (
+        'the default engine no longer needs pyarrow — narrow the dependencies in pyproject'
+    )
+
+
+def test_the_polars_engine_needs_neither_pandas_nor_pyarrow(dispatch_yaml):
+    """No dataframe library but polars, on this engine.
+
+    A per-engine claim rather than a runtime-wide one, because the default
+    engine cannot keep it (:func:`test_the_default_engine_needs_arrow`). Stated
+    here it keeps the polars engine's footprint a measured property rather than
+    a thing that quietly widens: a build on it touches nothing else, so on this
+    engine a bridge out stays a bridge.
+    """
+    assert 'IMPORTED []' in _footprint(dispatch_yaml, 'polars'), (
+        'the polars engine reaches a dataframe library it does not need'
+    )
 
 
 def test_check_and_load_model_need_no_data(dispatch_yaml):

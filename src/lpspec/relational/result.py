@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     import polars as pl
     import xarray as xr
 
-    from lpspec.relational.engines.polars.executor import PolarsExecutor
+    from lpspec.relational.engine import Engine
     from lpspec.relational.status import SolveStatus
 
 
@@ -78,7 +78,7 @@ class Result:
 
     _status: SolveStatus
     _objective: float
-    _executor: PolarsExecutor
+    _executor: Engine
     _primal_values: pl.Series | None = None
     _dual_values: pl.Series | None = None
     _closed: bool = False

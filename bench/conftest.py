@@ -37,18 +37,22 @@ if TYPE_CHECKING:
 #: The relative gap two arms' objectives may differ by and still be one model.
 GATE_RTOL = 1e-9
 
-#: How `--arms` names map to what actually runs. `duckdb` is not a third lane:
+#: How `--arms` names map to what actually runs. `polars` is not a third lane:
 #: it is the lpspec arm with the engine switch a caller has, which is why the
 #: harness sets `LPSPEC_ENGINE` in the measured process rather than reaching
 #: for a selector only it knows about.
-ENGINE = {'lpspec': None, 'duckdb': 'duckdb'}
+#:
+#: `lpspec` maps to `None` — the *default* engine, whatever it is — rather than
+#: to a name. That is what makes the plain arm, and so every unflagged
+#: measurement CI takes, follow the shipped default.
+ENGINE = {'lpspec': None, 'polars': 'polars'}
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     g = parser.getgroup('ladder', 'the lpspec benchmark ladder')
     g.addoption('--cases', nargs='+', default=sorted(CASES), choices=sorted(CASES))
     g.addoption('--sizes', nargs='+', default=['xs', 's', 'm'], help="rung labels, or 'all' for every rung a case has")
-    g.addoption('--arms', nargs='+', default=['lpspec', 'linopy'], choices=('lpspec', 'linopy', 'duckdb'))
+    g.addoption('--arms', nargs='+', default=['lpspec', 'linopy'], choices=('lpspec', 'linopy', 'polars'))
     g.addoption(
         '--sinks',
         nargs='+',

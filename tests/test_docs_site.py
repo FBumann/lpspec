@@ -205,3 +205,47 @@ def test_every_law_cites_the_section_that_elaborates_it():
             broken.append(f'law {number} cites no section')
         broken += [f'law {number} -> #{t}' for t in targets if t not in slugs]
     assert not broken, f'laws whose citation does not resolve in SPEC.md: {broken}'
+
+
+MERMAID = re.compile(r'```mermaid\n(.*?)```', re.DOTALL)
+_ID = r'[A-Za-z_][A-Za-z0-9_]*'
+
+
+def _mermaid_blocks() -> list[tuple[Path, str]]:
+    return [(p, block) for p in DOCS.rglob('*.md') for block in MERMAID.findall(p.read_text())]
+
+
+def test_every_mermaid_edge_points_at_a_node_that_exists():
+    """A renamed node must not silently orphan the edge that pointed at it.
+
+    Mermaid does not error on an unknown id — it invents an empty box labelled
+    with the id and draws the edge into that. So a rename leaves a diagram that
+    still renders, still passes `mkdocs build --strict`, and is wrong: a stray
+    box where the real one used to be, and the real one floating unconnected.
+
+    That happened while the second engine was being drawn in — `BIND` became
+    `BINDP` in its declaration and nowhere else — and nothing caught it but a
+    reader.
+    """
+    for path, block in _mermaid_blocks():
+        declared = set(re.findall(rf'\b({_ID})\s*[\[\("]', block))
+        declared |= set(re.findall(rf'subgraph\s+({_ID})', block))
+        referenced = set()
+        for raw in block.splitlines():
+            line = raw.split('%%')[0]
+            if '-->' not in line:
+                continue
+            for part in re.split(r'-->\|[^|]*\||-->', line):
+                name = part.strip().split('[')[0].split('(')[0].strip()
+                if re.fullmatch(_ID, name):
+                    referenced.add(name)
+        orphans = sorted(referenced - declared)
+        assert not orphans, f'{path.name}: edges point at undeclared nodes {orphans}'
+
+
+def test_every_mermaid_subgraph_is_closed():
+    """One missing `end` swallows the rest of the diagram into the last box."""
+    for path, block in _mermaid_blocks():
+        opens = len(re.findall(r'^\s*subgraph\b', block, re.MULTILINE))
+        closes = len(re.findall(r'^\s*end\s*$', block, re.MULTILINE))
+        assert opens == closes, f'{path.name}: {opens} subgraph vs {closes} end'

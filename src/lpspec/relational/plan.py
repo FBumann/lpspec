@@ -20,7 +20,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypeVar
 
-from lpspec.errors import unknown_name_message
+from lpspec.errors import LanguageError, unknown_name_message
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 if TYPE_CHECKING:
     import datetime
@@ -388,6 +391,79 @@ class Program:
 
     def constraint(self, name: str) -> ConstraintDeclaration:
         return _declared(self.constraints, name, 'constraint')
+
+
+def name_dims(program: Program) -> dict[str, tuple[str, ...]]:
+    """The dims each declared name is read through.
+
+    Parameters by their ``dims`` and variables by their ``foreach``. A bare
+    name in a ``where`` may be either, and the questions below only ask which
+    dims it touches. One flat mapping, because the language has one flat
+    namespace and the two cannot collide.
+    """
+    dims: dict[str, tuple[str, ...]] = {p.name: p.dims for p in program.parameters}
+    dims.update({v.name: v.dims for v in program.variables})
+    return dims
+
+
+def predicate_dims(where: Predicate, dims: Mapping[str, tuple[str, ...]]) -> frozenset[str]:
+    """Which dims *where* reads, against the mapping :func:`name_dims` builds.
+
+    A parameter is read through its own dims, a variable through its foreach,
+    a dimension comparison through the dim it names, and a constant reads
+    nothing.
+
+    Raises:
+        LanguageError: A predicate this function does not know. One that forgot
+            to answer here would silently mis-restrict or mislabel a model —
+            the polars compiler's semi-join, its label planner and the duckdb
+            executor's all read this.
+    """
+    if isinstance(where, BooleanConstant):
+        return frozenset()
+    if isinstance(where, DimensionComparison):
+        return frozenset({where.dimension})
+    if isinstance(where, (ParameterComparison, ParameterDefined)):
+        touched = frozenset(dims.get(where.parameter, ()))
+        # a parameter compared against another parameter reads both
+        value = getattr(where, 'value', None)
+        if isinstance(value, str) and value in dims:
+            touched |= frozenset(dims[value])
+        return touched
+    if isinstance(where, VariableDefined):
+        # Read through the variable's own foreach, exactly as a parameter is
+        # read through its dims. `free_prefix` then keeps the arithmetic path
+        # for the leading dims this mask cannot see, as for any other predicate.
+        return frozenset(dims.get(where.variable, ()))
+    if isinstance(where, (And, Or)):
+        return predicate_dims(where.left, dims) | predicate_dims(where.right, dims)
+    if isinstance(where, Not):
+        return predicate_dims(where.operand, dims)
+    raise LanguageError(
+        f'{type(where).__name__} is a predicate the mask planner does not know how to read; '
+        'add it to predicate_dims before using it in a where'
+    )
+
+
+def free_prefix(dims: tuple[str, ...], touched: frozenset[str]) -> int:
+    """How many leading dims a mask does not read.
+
+    Leading, not merely absent: a label follows declaration order, so only a
+    prefix leaves the surviving set contiguous under each of its coordinates.
+    Returns 0 when the mask reads the first dim — the case that has to count
+    its survivors the slow way — and 0 again when *no* dim is read, where the
+    split would gain nothing over the one-path arithmetic.
+
+    Static like the rest of this module, and shared for the reason a label is
+    shared: the engines must not be able to disagree about which coordinate
+    gets which solver index, and the cheapest way to guarantee that is for
+    them to ask one function which route to take.
+    """
+    free = 0
+    while free < len(dims) and dims[free] not in touched:
+        free += 1
+    # every remaining dim is masked-or-not; the split only helps if something is left
+    return free if free < len(dims) else 0
 
 
 def parameters_of(*expressions: Expression) -> frozenset[str]:

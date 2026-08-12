@@ -80,8 +80,6 @@ def test_emit(
     """
     if sink == 'gurobi':
         pytest.importorskip('gurobipy')
-    if arm == 'duckdb':
-        pytest.importorskip('duckdb')
     gate(case_name, paths)
 
     case_paths = paths(case_name, size)
@@ -111,8 +109,6 @@ def test_rebuild(benchmark: Any, gate: Any, paths: Any, builds: int, case_name: 
     Not run under CodSpeed at all — its instruments ignore `rounds`, so there is
     no second build to compare the first against. `conftest.py` deselects it.
     """
-    if arm == 'duckdb':
-        pytest.importorskip('duckdb')
     gate(case_name, paths)
 
     if builds < 1:

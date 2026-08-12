@@ -31,6 +31,10 @@ env:
   # The regression slice of the ladder: one lane, the rungs small enough to run
   # twice in a job. `--skip-gate` because a single-arm gate compares an
   # objective with itself — the cross-lane check belongs to the published run.
+  #
+  # `lpspec` is the *default* engine, so this gates whatever a caller gets —
+  # duckdb today. `--arms lpspec polars` is the other engine, and prices the
+  # choice rather than a change to it.
   SELECT: >-
     --arms lpspec --sizes s m
     --cases dispatch nodal transport profiled

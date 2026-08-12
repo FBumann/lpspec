@@ -16,8 +16,7 @@ which is what :class:`~lpspec.relational.engines.polars.binding.BoundSources` sa
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, get_args
 
 import polars as pl
 
@@ -30,10 +29,10 @@ from lpspec.errors import (
     uncovered_constant_message,
 )
 from lpspec.relational import plan, sinks
+from lpspec.relational.binding import BoundSources, bind
+from lpspec.relational.engine import Engine
 from lpspec.relational.engines.polars import labels
-from lpspec.relational.engines.polars.binding import BoundSources, bind
 from lpspec.relational.engines.polars.compiler import PolarsCompiler, TermFragment
-from lpspec.relational.result import Result
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -75,15 +74,15 @@ _DTYPES = {
 }  # fmt: skip
 
 
-class PolarsExecutor:
+class PolarsExecutor(Engine):
     """Build a :class:`Program` into polars frames, then sink it."""
 
     def __init__(self) -> None:
         self._program: plan.Program | None = None
         self._compiler: PolarsCompiler | None = None
         self._bound: BoundSources | None = None
-        self._variables: dict[str, pl.LazyFrame] = {}
-        self._constraints: dict[str, pl.LazyFrame] = {}
+        self._var_frames: dict[str, pl.LazyFrame] = {}
+        self._row_frames: dict[str, pl.LazyFrame] = {}
         #: ``name -> rows not built``, because every term they had vanished.
         #: Empty for a model whose every declared row reached the solver.
         self._omitted: dict[str, int] = {}
@@ -123,7 +122,7 @@ class PolarsExecutor:
         """
         self._program = program
         self._bound = bind(program, sources)
-        self._compiler = PolarsCompiler(program, self._bound, self._variables)
+        self._compiler = PolarsCompiler(program, self._bound, self._var_frames)
 
         cols = [self._build_variable(v) for v in program.variables]
         built = [self._build_constraint(c) for c in program.constraints]
@@ -135,6 +134,14 @@ class PolarsExecutor:
         self._matrix_starts = _row_starts(ordered, self._n_rows)
         self._matrix = ordered.select('col', 'coeff').rechunk()
         self._obj = _stack([objective] if objective is not None else [], _OBJ)
+
+    @property
+    def _variables(self) -> Mapping[str, pl.LazyFrame]:
+        return self._var_frames
+
+    @property
+    def _constraints(self) -> Mapping[str, pl.LazyFrame]:
+        return self._row_frames
 
     @property
     def _q(self) -> PolarsCompiler:
@@ -211,7 +218,7 @@ class PolarsExecutor:
         """
         start = self._n_cols
         labelled, self._n_cols = labels.frame(self._q, v.dims, v.where, 'var_label', start)
-        self._variables[v.name] = labelled.lazy()
+        self._var_frames[v.name] = labelled.lazy()
         self._blocks[v.name] = (start, labelled.height)
 
         bounded = labels.in_position_order(
@@ -260,7 +267,7 @@ class PolarsExecutor:
         start = self._n_rows
         labelled, self._n_rows = labels.frame(self._q, c.dims, c.where, 'row', start, restrictions)
         frame = labelled.lazy()
-        self._constraints[c.name] = frame
+        self._row_frames[c.name] = frame
         self._blocks[c.name] = (start, labelled.height)
 
         accumulated = pl.lit(0.0, dtype=pl.Float64)
@@ -294,7 +301,7 @@ class PolarsExecutor:
             self._omitted[c.name] = rows.height
             self._blocks[c.name] = (start, 0)
             self._n_rows = start
-            self._constraints[c.name] = self._constraints[c.name].clear()
+            self._row_frames[c.name] = self._row_frames[c.name].clear()
             return rows.clear(), None
 
         pieces = []
@@ -343,8 +350,8 @@ class PolarsExecutor:
         remap = dict(zip(renumber.get_column('row'), renumber.get_column('__new__'), strict=True))
         rows = surviving.with_columns(pl.col('row').replace_strict(remap))
         matrix = matrix.with_columns(pl.col('row').replace_strict(remap))
-        self._constraints[name] = (
-            self._constraints[name].filter(pl.col('row').is_in(kept)).with_columns(pl.col('row').replace_strict(remap))
+        self._row_frames[name] = (
+            self._row_frames[name].filter(pl.col('row').is_in(kept)).with_columns(pl.col('row').replace_strict(remap))
         )
         return rows, matrix, start + surviving.height
 
@@ -407,160 +414,6 @@ class PolarsExecutor:
             objective_constant=self._obj_const,
         )
 
-    def omissions(self) -> pl.DataFrame:
-        """``(constraint, rows_not_built)`` — every row that lost all its terms.
-
-        A row with no variable terms is not built (SPEC §6). Counts, not
-        coordinates; empty for a model whose every declared row reached the
-        solver.
-        """
-        return pl.DataFrame(
-            {'constraint': list(self._omitted), 'rows_not_built': list(self._omitted.values())},
-            schema={'constraint': pl.String, 'rows_not_built': pl.UInt32},
-        )
-
-    def write(self, path: str | Path) -> None:
-        """Stream the built model to *path*, in the format its suffix names.
-
-        Raises:
-            ValueError: A suffix nothing writes.
-            NotImplementedError: A format that is planned and not here yet.
-        """
-        path = Path(path)
-        sinks.writer(path.suffix.lower())(self._tables(), path)
-
-    def solve(
-        self,
-        batch_rows: int | None = None,
-        solver_options: Mapping[str, Any] | None = None,
-        solver_name: str = 'highs',
-    ) -> Result:
-        """Hand the built model to a solver and solve it.
-
-        Args:
-            batch_rows: The hand-off budget in elements, defaulting to the
-                sink's own
-                (:data:`~lpspec.relational.sinks.solvers.highs.HANDOFF_BUDGET`).
-            solver_options: Forwarded to the solver verbatim, in its own
-                vocabulary (``{'time_limit': 60, 'mip_rel_gap': 0.01}``).
-            solver_name: ``highs``, which ships with the package, or
-                ``gurobi``, which needs the ``[gurobi]`` extra.
-
-        Returns:
-            The solution, holding this executor.
-        """
-        status, objective, primal, dual = sinks.solver(solver_name)(self._tables(), batch_rows, solver_options)
-        _spanning(solver_name, 'primal', primal, self._n_cols)
-        _spanning(solver_name, 'dual', dual, self._n_rows)
-        return Result(
-            _status=status,
-            _objective=objective,
-            _executor=self,
-            _primal_values=primal,
-            _dual_values=dual,
-        )
-
-    def _solution_frame(self, name: str, values: pl.Series | None) -> pl.LazyFrame:
-        """The tidy solution of variable *name*: ``(dims…, value)``.
-
-        A slice, never a dense array and never a join. *values* is the solver's
-        column vector, held by the :class:`Result` that asks — labels are the
-        build's and shared, values are one solve's and are not.
-
-        **In label order**: a label *is* row-major position in the coordinate
-        product, so the caller gets the model's own order rather than the order
-        a hash join happened to finish in.
-        """
-        assert self._program is not None
-        assert values is not None, 'no solve has stored a primal'
-        return self._read_back(name, self._variables[name], self._program.variable(name).dims, values)
-
-    def _read_back(
-        self,
-        name: str,
-        coordinates: pl.LazyFrame,
-        dims: tuple[str, ...],
-        values: pl.Series,
-    ) -> pl.LazyFrame:
-        """One declaration's coordinates in label order, beside its values.
-
-        **The order is not re-established here, because it was never lost**:
-        :func:`labels.frame` numbers a sorted frame and hands back a
-        label-ascending one.
-
-        The declaration owns a contiguous, dense run of labels
-        (:attr:`_blocks`) and the solver's vector is positional in the same
-        index, so coordinates and values line up by construction. The slice is
-        attached as a column rather than concatenated as a frame, so a
-        mismatched length raises instead of padding with nulls.
-
-        **Dim columns leave in ``String``**, where the build holds them as
-        ``pl.Enum`` (#541). That encoding is internal and every gram of its win
-        is upstream of here, but a returned frame is something a caller *joins
-        against their own data* — and polars refuses ``Enum`` against
-        ``String`` with a message about dtypes that names nothing about the
-        cause. Two frames of one sweep will not even concatenate when their
-        slices bound different members.
-
-        The cast sits inside this projection rather than after it, so the
-        string column is produced once instead of widened from an Enum that
-        also exists, which is cheaper in both wall and peak (#593). Declaration
-        order is the *row* order and survives, never having been the dtype's to
-        carry.
-        """
-        start, height = self._blocks[name]
-        labelled = coordinates.select(*dims).with_columns(values.slice(start, height))
-        return labelled.with_columns(pl.col(d).cast(pl.String) for d in self._string_dims(dims))
-
-    def _string_dims(self, dims: tuple[str, ...]) -> list[str]:
-        """Those of *dims* the binder encoded as ``Enum`` — its string ones."""
-        assert self._bound is not None, 'build() has not run'
-        return [d for d in dims if self._bound.is_enum_encoded(d)]
-
-    def _primal(self, name: str, values: pl.Series | None) -> pl.DataFrame:
-        return self._solution_frame(name, values).collect(engine='streaming')
-
-    def _dual(self, name: str, values: pl.Series) -> pl.DataFrame:
-        """:meth:`_solution_frame` against row labels instead of column ones.
-
-        Ordered and sliced the same way, for the same reason — a constraint
-        row's label is its position in that constraint's coordinate product.
-        """
-        assert self._program is not None
-        dims = self._program.constraint(name).dims
-        return self._read_back(name, self._constraints[name], dims, values).collect(engine='streaming')
-
-    def _no_duals_reason(self, termination_condition: str) -> str:
-        """Why a solve that *did* leave values still has no duals.
-
-        Integrality is decidable from the program, and naming the variable is
-        actionable where "the solver reported none" is not.
-        """
-        assert self._program is not None
-        discrete = sorted(v.name for v in self._program.variables if v.variable_type != 'continuous')
-        if discrete:
-            names = ', '.join(f"'{n}'" for n in discrete)
-            return (
-                f'duals are undefined for a mixed-integer model: {names} '
-                f'{"is" if len(discrete) == 1 else "are"} not continuous. '
-                f'Drop the integrality to price the LP relaxation instead.'
-            )
-        return (
-            f'the solver returned no dual solution, though the solve terminated '
-            f'{termination_condition!r}. Duals come from a simplex basis, which a '
-            f'run stopped short of one does not have.'
-        )
-
-    def _solution_to_parquet(self, directory: Path, values: pl.Series | None) -> dict[str, Path]:
-        assert self._program is not None
-        directory.mkdir(parents=True, exist_ok=True)
-        written: dict[str, Path] = {}
-        for v in self._program.variables:
-            out = directory / f'{v.name}.parquet'
-            self._solution_frame(v.name, values).sink_parquet(out)
-            written[v.name] = out
-        return written
-
     # ------------------------------------------------------------------
 
     def close(self) -> None:
@@ -571,18 +424,11 @@ class PolarsExecutor:
         reference to them, and the compiler holds one.
         """
         self._cols = self._obj = self._rows = self._matrix = self._matrix_starts = None
-        self._variables.clear()
-        self._constraints.clear()
+        self._var_frames.clear()
+        self._row_frames.clear()
         self._blocks.clear()
         self._bound = None
         self._compiler = None
-
-    def __enter__(self) -> PolarsExecutor:
-        return self
-
-    def __exit__(self, *exc: object) -> Literal[False]:
-        self.close()
-        return False
 
 
 def _spanning(solver: str, quantity: str, values: pl.Series | None, expected: int) -> None:

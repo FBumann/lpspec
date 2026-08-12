@@ -16,6 +16,12 @@ values, so the survivors are a rectangle and only the masked suffix needs rows
 (:func:`_factored`): labelling one time-invariantly-masked variable through the
 full product costs a large peak the rectangle avoids entirely, where the
 rectangle is a few hundred rows plus the output (#520).
+
+**Which** of the two a mask allows is a question about the plan, not about
+polars, so it is asked of `plan.free_prefix` and answered identically for the
+duckdb engine. Only the executions live here — two engines choosing the split
+independently is how they would come to disagree about which coordinate gets
+which solver index.
 """
 
 from __future__ import annotations
@@ -24,12 +30,12 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from lpspec.relational.engines.polars.compiler import UNIT, ordinal, predicate_dims, restrict_by_presence
+from lpspec.relational import plan
+from lpspec.relational.engines.polars.compiler import UNIT, ordinal, restrict_by_presence
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from lpspec.relational import plan
     from lpspec.relational.engines.polars.compiler import PolarsCompiler
 
 
@@ -72,7 +78,7 @@ def frame(
         next free label.
     """
     if where is not None and not restrictions:
-        free = _free_prefix(dims, predicate_dims(where, compiler.name_dims))
+        free = plan.free_prefix(dims, plan.predicate_dims(where, compiler.name_dims))
         if free:
             factored = _factored(compiler, dims, free, where, label, start)
             if factored is not None:
@@ -154,21 +160,6 @@ def _factored(
         .collect(engine='streaming')
     )
     return in_position_order(labelled, label).with_columns(pl.col(label).set_sorted())
-
-
-def _free_prefix(dims: tuple[str, ...], touched: frozenset[str]) -> int:
-    """How many leading dims the mask does not read.
-
-    Leading, not merely absent: a label follows declaration order, so only a
-    prefix leaves the surviving set contiguous under each of its coordinates.
-    Returns 0 when the mask reads the first dim — the case that has to count
-    its survivors the slow way — and 0 again when *no* dim is read, where the
-    split would gain nothing over the one-path arithmetic.
-    """
-    free = 0
-    while free < len(dims) and dims[free] not in touched:
-        free += 1
-    return free if free < len(dims) else 0
 
 
 def _row_major(compiler: PolarsCompiler, dims: tuple[str, ...]) -> pl.Expr:

@@ -10,11 +10,11 @@ they loaded, which is the one thing neither may do.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
 import polars as pl
 
-from lpspec.relational import chunking
+from lpspec.relational import chunking, plan
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -40,6 +40,88 @@ if TYPE_CHECKING:
 #: rather than as a boxed Python string. The order is arbitrary and shared: a
 #: solver indexes its own spelling with these, so the two cannot drift.
 SENSE_CODES = {'<=': 0, '>=': 1, '==': 2}
+
+
+#: The columns of each frame, in order.
+COLS = ('lb', 'ub', 'vtype')
+OBJ = ('col', 'coeff')
+ROWS = ('row', 'sense', 'rhs')
+MATRIX = ('row', 'col', 'coeff')
+
+#: And the dtype of each column. Here rather than in an executor because it is
+#: what a *sink* reads: two engines filling the same four frames with different
+#: types is a difference no sink asked for and none can see coming.
+#:
+#: ``vtype`` is an ``Enum`` over the variable types the plan declares, rather
+#: than a string: it holds one word per column and the same handful of words
+#: for the whole model, so as a string it stores that word once per row —
+#: 0.098 GB of the ``cols`` frame's 0.333 at 9.8M columns, against 0.010 as an
+#: Enum. The Enum also makes the vocabulary explicit, so a fourth variable type
+#: added to :data:`~lpspec.relational.plan.VariableType` and not reaching here
+#: fails where the column is built rather than in whichever sink first compares
+#: against a name it does not know.
+#:
+#: ``col`` is ``Int32`` — the solver's own index width, HiGHS and Gurobi both
+#: being 32-bit indexed, so a count past 2^31 has no sink that could take it
+#: and the strict cast raises there rather than wrapping. An engine casts where
+#: the column is *produced*, not on the stacked frame: narrowing afterwards
+#: allocates the narrow copy while the wide one is still alive, a transient
+#: visible in `dispatch/l`'s peak RSS. A *label* stays ``Int64``: it is a
+#: position in the full pre-mask coordinate product, which can pass 2^31 while
+#: every survivor fits.
+DTYPES = {
+    'col': pl.Int32, 'row': pl.Int64,
+    'lb': pl.Float64, 'ub': pl.Float64, 'rhs': pl.Float64, 'coeff': pl.Float64,
+    'sense': pl.String, 'vtype': pl.Enum(get_args(plan.VariableType)),
+}  # fmt: skip
+
+#: The variable-type column's dtype, which an engine builds a literal against.
+VTYPE = DTYPES['vtype']
+
+
+def compress_rows(matrix: pl.DataFrame, row_count: int) -> tuple[pl.DataFrame, npt.NDArray[np.int64]]:
+    """A ``(row, col, coeff)`` matrix as the CSR pair `ModelTables` takes.
+
+    Here rather than in an engine because it is the *contract's* layout: both
+    engines stack their constraints' shares in declaration order, which is
+    ascending row ranges, and both then owe a sink the same compressed form.
+    Two engines compressing separately could disagree about which entries a row
+    owns — the one thing neither may do.
+
+    ``row`` is known to ascend, and that is **checked rather than assumed**.
+    polars cannot see the ordering through a ``concat``, and a sink that finds
+    the flag missing orders the whole matrix again; ``is_sorted`` is a linear
+    scan over a column the frame already holds, and the sort behind it is the
+    correctness floor, expected never to run.
+
+    The starts are a run-length over that sorted column, then a scatter and a
+    cumulative sum — robust to the model's shape where the obvious alternatives
+    are not: ``bincount`` pays per entry (26 ms to rle's 7 at 10M entries over
+    100k rows), ``searchsorted`` per row times the log of the entries, and
+    either is the wrong one on some ladder case. Computed here so ``row`` can
+    then be dropped: a label repeated once per nonzero is 8 bytes per entry no
+    sink reads, since every consumer either slices by these starts or asks
+    :meth:`ModelTables.matrix_block` to spell the labels back out.
+
+    The kept matrix is then **rechunked, once**. A streaming collect leaves it
+    in chunks, and a sink slices it per row block — against a chunked frame
+    every block's ``to_numpy`` is a gather-copy, where against one contiguous
+    buffer it is a view (codspeed caught the difference as -6.9% on
+    `profiled-m`, ~150 blocks over 16 chunks).
+    """
+    import numpy as np
+
+    if not matrix.height:
+        ordered = matrix
+    elif not matrix['row'].is_sorted():
+        ordered = matrix.sort('row')
+    else:
+        ordered = matrix.with_columns(pl.col('row').set_sorted())
+
+    runs = ordered['row'].rle()
+    starts = np.zeros(row_count + 1, dtype=np.int64)
+    starts[runs.struct.field('value').to_numpy() + 1] = runs.struct.field('len').to_numpy()
+    return ordered.select('col', 'coeff').rechunk(), np.cumsum(starts, out=starts)
 
 
 @dataclass(frozen=True)

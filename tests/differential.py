@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
     from lpspec.language.model import Model
-    from lpspec.relational.engines.polars.executor import Result
+    from lpspec.relational.result import Result
 
 #: Both lanes hand the same numbers to the same solver, so they must agree to
 #: solver precision, not to a fudge factor. One tolerance, one place.

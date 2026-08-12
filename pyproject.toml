@@ -34,6 +34,19 @@ dependencies = [
     # PyCapsule protocol and any consumer takes it without this package
     # depending on their library.
     "polars>=1.30",
+    # the default engine, and the Arrow it hands frames over. Required rather
+    # than optional because `DEFAULT_ENGINE` names it: an engine a plain
+    # `pip install lpspec` cannot select is not a default. pyarrow is not
+    # incidental — duckdb and polars exchange frames through Arrow, and a
+    # declaration carrying only `duckdb` installs cleanly and then fails on the
+    # first build.
+    #
+    # pandas is *not* implied by either: pyarrow imports it opportunistically
+    # when it is already installed, which is what makes this easy to measure
+    # wrongly in a development environment. The bare-install CI job is what
+    # proves it, by having no pandas there at all.
+    "duckdb>=1.5",
+    "pyarrow>=16",
     # the solver_direct sink's own arithmetic: `searchsorted` builds the CSR
     # row starts HiGHS wants, and the batch coercions are its dtypes. Array
     # work at the solver boundary, not a dataframe dependency.
@@ -132,14 +145,13 @@ bench = [
 # across commits, so the plugin version is part of the measurement rather than
 # part of the environment — a floor would let a bump land as a regression.
 #
-# pandas and pyarrow are here because `bench/cases.py` writes the parquet inputs
-# with them. Declaring them lets CI install this group with
-# `--no-default-groups` and skip resolving linopy from a git branch for a job
-# that never builds a linopy model.
+# pandas is here because `bench/cases.py` writes the parquet inputs with it.
+# Declaring it lets CI install this group with `--no-default-groups` and skip
+# resolving linopy from a git branch for a job that never builds a linopy
+# model. pyarrow is not repeated: the engine depends on it directly.
 codspeed = [
     "pytest-codspeed==5.0.3",
     "pandas>=2.2",
-    "pyarrow>=16",
 ]
 # The published site (mkdocs.yml). Its own group, not `dev`: nothing in the
 # test suite imports any of it, and a contributor running `uv run pytest` should
@@ -169,10 +181,6 @@ dev = [
     # sink's tests stay under it. Its own tests skip where it is absent, so a
     # contributor who does not want it can drop it without failing the suite.
     "lpspec[gurobi]",
-    # how pandas reads parquet, which the benchmark harness's linopy arm does
-    # as part of the cost it is there to measure. Not needed by the engine —
-    # the bare-install job runs the suite without it.
-    "pyarrow>=16",
     "typst>=0.15.0",
 ]
 
@@ -270,6 +278,15 @@ preset = "strict"
 #   deprecated   — currently only fires on typeshed's `contextlib.contextmanager`
 #                  overload.
 #
+# Deliberately DISABLED, which is a different thing and needs the stronger
+# reason:
+#   missing-override-decorator — `typing.override` is 3.12+, and this project's
+#                  floor is 3.11 (above). Satisfying the rule would mean taking
+#                  `typing_extensions` as a runtime dependency to spell a lint,
+#                  which the dependency policy in CLAUDE.md rules out. Revisit
+#                  when the floor reaches 3.12; it is the only rule here that is
+#                  off because it cannot be met, rather than because it is wrong.
+#
 # `implicit-any-lambda` is left on and suppressed per line in the two grammars.
 # A lambda takes no annotation, and giving the parse action a typed callback
 # only moves the error: pyparsing returns `ParseResults`, whose `__getitem__`
@@ -277,6 +294,7 @@ preset = "strict"
 # handoff `explicit-any` is unpromoted for. Kept on rather than switched off so
 # a lambda outside those grammars still has to say what it takes.
 [tool.pyrefly.errors]
+missing-override-decorator = false
 implicit-import = true
 missing-import = true
 non-exhaustive-match = true
