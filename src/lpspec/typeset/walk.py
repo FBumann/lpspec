@@ -202,7 +202,10 @@ class Walk:
         reduction — it re-indexes its operand, so like ``shift`` it emits no
         operator and the substitution appears at the leaves; falling through to
         the summation would render it as a sum over the fine dim, silently the
-        wrong equation.
+        wrong equation. ``cumsum`` *is* a summation, but a bounded one: its
+        domain runs over a primed copy of the index up to the current one, and
+        the body reads through that primed index — falling through would render
+        the whole-domain sum, silently the wrong equation too.
         """
         if node.name == 'shift':
             dim = node.kwargs['over']
@@ -220,6 +223,17 @@ class Walk:
             assert isinstance(by, CoordinateNode)
             mapping = self.format.apply(self.format.upright(by.name), ctx.subscript(onto.name))
             return self._arithmetic(node.args[0], ctx.pulled_back(by.into, mapping))
+
+        if node.name == 'cumsum':
+            dim = node.kwargs['over']
+            assert isinstance(dim, DimensionNode)
+            bound = f"{self.symbols.index[dim.name]}'"
+            domain = (
+                f'{bound} {self.op("in")} {self.symbols.set[dim.name]} '
+                f'{self.op("such_that")} {bound} {self.op("le")} {ctx.subscript(dim.name)}'
+            )
+            body = self.reduction_body(node.args[0], ctx.pulled_back(dim.name, bound))
+            return self.format.summation(domain, body), _PRECEDENCE['+']
 
         over = node.kwargs['over']
         assert isinstance(over, DimensionNode)

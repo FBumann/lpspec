@@ -271,6 +271,30 @@ def test_a_shape_operator_along_a_dim_the_expression_lacks_is_refused():
         compiler().expression(plan.Translate(plan.Parameter('cost'), 'snapshot', by=1), 'test')
 
 
+def test_a_cumulative_sum_scans_the_dim_in_ord_order_and_keeps_its_dims():
+    """The one ordered scan the operator is: sorted by the dim table's ord.
+
+    Sorting by the label column instead would accumulate in sorted rather than
+    declared order — right on every integer fixture and wrong on the first
+    string one — and only the query shape holds that apart.
+    """
+    fragment = compiler().expression(plan.CumulativeSum(plan.Parameter('load'), 'snapshot'), 'test').consts[0]
+    assert fragment.dims == ('snapshot',)
+    assert columns(fragment.frame) == ['snapshot', 'cval']
+    assert 'SORT' in query(fragment.frame), 'the running sum is ordered by the declared ord'
+
+
+def test_a_cumulative_sum_along_a_dim_the_expression_lacks_is_refused():
+    with pytest.raises(LanguageError, match='cumulative sum'):
+        compiler().expression(plan.CumulativeSum(plan.Parameter('cost'), 'snapshot'), 'test')
+
+
+def test_a_cumulative_sum_over_a_term_is_a_hand_built_plan_and_refused():
+    """Lowering refuses a variable-carrying operand, so a term here is hand-built."""
+    with pytest.raises(LanguageError, match='lowering refuses'):
+        compiler().expression(plan.CumulativeSum(plan.Variable('p'), 'snapshot'), 'test')
+
+
 # ---------------------------------------------------------------------------
 # predicates
 # ---------------------------------------------------------------------------

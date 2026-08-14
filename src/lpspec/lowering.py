@@ -44,7 +44,7 @@ from lpspec.language.expression_parser import (
     UnaryOperatorNode,
     VariableNode,
 )
-from lpspec.language.helpers import call_shape_error, edge_error
+from lpspec.language.helpers import call_shape_error, cumsum_over_variable_message, edge_error
 from lpspec.language.piecewise import expand_piecewise
 from lpspec.language.resolution import Namespace, expression_of, where_of
 from lpspec.language.where_parser import (
@@ -284,6 +284,15 @@ def _lower_expr(node: ArithmeticNode, schema: Model, context: str) -> plan.Expre
                 wrap=wrap,
                 fill=fill,
             )
+
+        if node.name == 'cumsum':
+            over_node = node.kwargs['over']
+            if not isinstance(over_node, DimensionNode):
+                raise LanguageError(f'{context}: cumsum(over=...) must name a dimension')
+            _check_dim_rules(node, schema, context)
+            if degree.carries_variable(node.args[0]):
+                raise LanguageError(f'{context}: {cumsum_over_variable_message()}')
+            return plan.CumulativeSum(_lower_expr(node.args[0], schema, context), over_node.name)
 
         raise LanguageError(f"{context}: built-in '{node.name}' declares no lowering case")
 

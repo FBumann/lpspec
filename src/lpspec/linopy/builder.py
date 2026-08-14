@@ -33,7 +33,7 @@ from lpspec.language.expression_parser import (
     UnaryOperatorNode,
     VariableNode,
 )
-from lpspec.language.helpers import EDGE_WRAP, unknown_helper_message
+from lpspec.language.helpers import EDGE_WRAP, cumsum_over_variable_message, unknown_helper_message
 from lpspec.language.resolution import Namespace, expression_of, where_of
 from lpspec.language.where_parser import (
     AndNode,
@@ -400,6 +400,8 @@ def _eval_ast(
             by = node.kwargs['by']
             assert isinstance(by, CoordinateNode)
             return _helper_at(args[0], _coordinate_array(by, ctx), into=by.into)
+        if node.name == 'cumsum' and degree.carries_variable(node.args[0]):
+            raise LanguageError(cumsum_over_variable_message())
         if (by := node.kwargs.get('group_by')) is not None:
             assert isinstance(by, CoordinateNode)
             return _helper_grouped_sum(args[0], _coordinate_array(by, ctx), into=by.into)
@@ -565,6 +567,23 @@ def _helper_shift(array: Any, *, over: str, by: float, edge: str | float | None 
     raise _unsupported('shift()', array)
 
 
+def _helper_cumsum(array: Any, *, over: str) -> Any:
+    """Running sum of *array* along *over* — the value at *t* is the sum through *t*.
+
+    YAML: ``cumsum(build_rate, over=year)``. Variable-free only; the refusal is
+    ``_eval_ast``'s, spoken in the language's one wording, so a DataArray is
+    the only operand shape left here. The coordinate labels are reattached
+    because xarray's ``cumsum`` drops the reduced dim's index, and alignment
+    downstream reads it.
+    """
+    if not isinstance(array, xr.DataArray):
+        raise _unsupported('cumsum()', array)
+    summed = array.cumsum(over)
+    if over in array.coords and over not in summed.coords:
+        summed = summed.assign_coords({over: array.coords[over]})
+    return summed
+
+
 #: Eager evaluation of every name in ``helpers.BUILTIN_NAMES``. The two must
 #: agree exactly — enforced by ``tests/test_architecture.py``, because a name
 #: one lane implements and the other does not is precisely the divergence
@@ -573,6 +592,7 @@ _HELPERS: dict[str, Callable[..., Any]] = {
     'sum': _helper_sum,
     'at': _helper_at,
     'shift': _helper_shift,
+    'cumsum': _helper_cumsum,
 }
 
 

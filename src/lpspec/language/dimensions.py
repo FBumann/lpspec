@@ -18,6 +18,7 @@ The rules::
                             -> x's dims without d, plus the dim c targets;
                                error if x has no d, or d declares no coord c
     shift(x, over=d, by=n)  -> same dims as x;      error if x has no d
+    cumsum(x, over=d)       -> same dims as x;      error if x has no d
 
 and at the declaration level::
 
@@ -201,12 +202,14 @@ def _dims_call(
             )
         return (inner - {by.into}) | {over.name}
 
-    if node.name == 'shift':
+    if node.name in ('shift', 'cumsum'):
         inner = _dims(node.args[0], schema, context, external)
         over = node.kwargs['over']
         assert isinstance(over, DimensionNode)
         if over.name not in inner:
-            raise DimensionError(f'{context}: shift(over={over.name}) but the expression has dims {sorted(inner)}.')
+            raise DimensionError(
+                f'{context}: {node.name}(over={over.name}) but the expression has dims {sorted(inner)}.'
+            )
         return inner
 
     msg = f"{context}: helper '{node.name}' has no dim rule"

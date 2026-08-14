@@ -88,5 +88,5 @@ model.
 
 **The ranking this implies:** indexed access blocks whole model classes today;
 the operational verbs block using the engine at 3am; solver breadth blocks
-arrival from linopy at all; semi-continuous and `cumsum`-over-data are cheap,
-unblocked and unscheduled.
+arrival from linopy at all; semi-continuous ([#383](https://github.com/fluxopt/lpspec/issues/383))
+is cheap, unblocked and unscheduled.

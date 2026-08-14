@@ -417,6 +417,7 @@ name-checked, so **every node's dim set is computable before any data is bound**
 | `sum(x, over=d, group_by=c)` | `(dims(x) − {d}) ∪ {target(c)}` | unless `d ∈ dims(x)`, or `d` declares no coordinate `c` |
 | `at(x, onto=d, by=c)` | `(dims(x) − {target(c)}) ∪ {d}` | unless `target(c) ∈ dims(x)`, or `d` declares no coordinate `c`, or `d ∈ dims(x)` already |
 | `shift(x, over=d, by=n)` | `dims(x)` | if `d ∉ dims(x)` |
+| `cumsum(x, over=d)` | `dims(x)` | if `d ∉ dims(x)` |
 
 Binary operators **union**: an outer product is legitimate when the frame
 declares the result. What must not be silent is the declaration disagreeing —
@@ -594,6 +595,7 @@ arguments are name-checked at load time:
 | `shift(array, over=dim, by=n)` | value at *t−n* | vacated positions are **absent**: they propagate and drop the row (§6) |
 | `shift(array, over=dim, by=n, edge='wrap')` | value at *t−n*, cyclic | coordinates fixed, values wrap; nothing is vacated |
 | `shift(array, over=dim, by=n, edge=v)` | value at *t−n* | vacated positions contribute the number **`v`** instead, and the row survives (`0` for a sum, `1` for a product) |
+| `cumsum(array, over=dim)` | at *t*, the sum of the values at every coordinate up to and including *t*, in `dim`'s declared order (§8) | **variable-free operands only** — the rule below. One data column, computed once and joined pointwise; a missing operand row contributes zero, the identity of the sum it feeds (law 8) |
 
 `array` is any node of the right dim set, so `shift` re-indexes a **parameter**
 as readily as a variable: `shift(dt, over=t, by=1, edge=0)` is the previous
@@ -622,6 +624,15 @@ Four rules govern `edge=`, and all four are law 8 in this position:
   lift the refusal, since it is decided on the expression before any mask is
   read, and `edge=0` alone leaves a row at that coordinate whose bound is the
   zero.
+
+**`cumsum` over an expression carrying a variable is a load error**, and the
+restriction is the operator's whole design: over data the running sum is one
+column, while over a variable row *t* would carry *t* terms — O(T²) nonzeros
+for what a recurrence says in O(T). The error names the rewrite — declare the
+running sum as a state variable, `total == shift(total, over=d, by=1, edge=0)
++ x`, which is exactly a storage SOC balance — and that the unbounded window
+over a variable stays refused unless the label budget ever prices it
+([#380](https://github.com/fluxopt/lpspec/issues/380)).
 
 Anything composable out of these belongs in `macros:`. Math that is not sayable
 at all goes to a declared `escape:` island

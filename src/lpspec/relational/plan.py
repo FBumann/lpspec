@@ -171,6 +171,25 @@ class Translate(Expression):
     fill: float | None = None
 
 
+@dataclass(frozen=True)
+class CumulativeSum(Expression):
+    """Running sum along one dimension, in its declared coordinate order.
+
+    The result at *t* sums ``operand`` over every coordinate up to and
+    including *t* — the same order ``shift`` reads positionally.
+
+    Variable-free by construction — lowering refuses an operand carrying a
+    variable (``helpers.cumsum_over_variable_message``), so this is always a
+    constant part: one ordered scan over an already-materialised table, and no
+    coefficient stream is touched. A missing operand row contributes zero, the
+    identity of the sum it feeds (SPEC §8), so the result is dense along
+    ``dimension``.
+    """
+
+    operand: Expression
+    dimension: str
+
+
 def children(expression: Expression) -> tuple[Expression, ...]:
     """The sub-expressions of *expression* — the structural half of any walk.
 
@@ -184,7 +203,7 @@ def children(expression: Expression) -> tuple[Expression, ...]:
         return (expression.left, expression.right)
     if isinstance(expression, Divide):
         return (expression.numerator, expression.divisor)
-    if isinstance(expression, (Sum, GroupSum, At, Translate)):
+    if isinstance(expression, (Sum, GroupSum, At, Translate, CumulativeSum)):
         return (expression.operand,)
     return ()
 

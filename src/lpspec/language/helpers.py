@@ -90,6 +90,11 @@ BUILTINS: dict[str, Builtin] = {
         required_value_kwargs=('by',),
         edge_kwargs=('edge',),
     ),
+    'cumsum': Builtin(
+        1,
+        'cumsum(<expr>, over=<dim>)',
+        dimension_kwargs=('over',),
+    ),
 }
 
 BUILTIN_NAMES = frozenset(BUILTINS)
@@ -106,6 +111,27 @@ def edge_error(name: str, given: str) -> str:
         f"Write edge='{EDGE_WRAP}' for a cyclic translation, a number for the "
         f'value the vacated positions contribute, or omit it and they are '
         f'absent — which drops the row.'
+    )
+
+
+def cumsum_over_variable_message() -> str:
+    """Why ``cumsum`` refuses an operand carrying a variable — one wording, both lanes.
+
+    The refusal is the whole design of the operator (#384): over data the
+    running sum is one column computed once, while over a variable row *t*
+    would carry *t* terms — O(T²) nonzeros for what a recurrence says in O(T).
+    """
+    return (
+        'cumsum() over an expression containing a variable is refused: row t '
+        'would carry every term up to t — O(T²) nonzeros for what a recurrence '
+        'says in O(T). Declare the running sum as a state variable instead (a '
+        'storage SOC balance is exactly this rewrite):\n'
+        '  variables:\n'
+        '    total: {foreach: [d]}\n'
+        '  constraints:\n'
+        '    total_def: {foreach: [d], expression: "total == shift(total, over=d, by=1, edge=0) + x"}\n'
+        'The unbounded window over a variable stays refused unless the label '
+        'budget ever prices it (#380); cumsum reduces variable-free expressions only.'
     )
 
 

@@ -120,6 +120,25 @@ def test_translation_distinguishes_a_wrapping_edge_from_a_dropping_one(fmt: Form
 
 
 @EVERY_FORMAT
+def test_a_cumulative_sum_renders_as_a_bounded_summation_over_a_primed_index(fmt: Format):
+    """cumsum is a sum whose domain stops at the current coordinate.
+
+    Falling through to the ordinary summation would print the whole-domain sum
+    — silently a different equation — so the render has to carry the primed
+    bound index and its ``≤`` against the row's own index.
+    """
+    model = {
+        'dimensions': {'year': {'dtype': 'int'}},
+        'parameters': {'build_rate': {'dims': ['year']}},
+        'variables': {'p': {'foreach': ['year'], 'bounds': {'lower': 0}}},
+        'constraints': {'cap': {'foreach': ['year'], 'expression': 'p <= cumsum(build_rate, over=year)'}},
+    }
+    text = typeset(model, fmt, legend=False)
+    assert f"y' {fmt.operators['le']} y" in text, 'the domain has to stop at the current coordinate'
+    assert f"y' {fmt.operators['in']}" in text, 'the bound index is a primed copy of the dimension index'
+
+
+@EVERY_FORMAT
 def test_the_legend_explains_wraparound_only_when_it_is_used(fmt: Format):
     rolled = {
         'dimensions': {'snapshot': {'dtype': 'int'}},

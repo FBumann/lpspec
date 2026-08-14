@@ -555,6 +555,8 @@ class PolarsCompiler:
                 return _map_fragments(ev(e.operand), lambda p: self._at_fragment(p, e, context))
             if isinstance(e, plan.Translate):
                 return _map_fragments(ev(e.operand), lambda p: self._translate_fragment(p, e, context))
+            if isinstance(e, plan.CumulativeSum):
+                return _map_fragments(ev(e.operand), lambda p: self._cumulative_fragment(p, e, context))
             raise LanguageError(f'unsupported expression node {type(e).__name__} in {context}')
 
         return ev(expr)
@@ -762,6 +764,38 @@ class PolarsCompiler:
         if not s.wrap and s.fill is not None and not p.is_term:
             frame = pl.concat([frame, self._filled_edge(s, card, others, s.fill)], how='vertical_relaxed')
         return replace(p, frame=frame, presence=travelled_presence())
+
+    def _cumulative_fragment(self, p: TermFragment, s: plan.CumulativeSum, context: str) -> TermFragment:
+        """One ordered scan of a constant part along ``s.dimension``.
+
+        The operand is collapsed to one row per coordinate first (``Sum`` and
+        ``GroupSum`` project rather than aggregate, so a const fragment may
+        carry several rows per coordinate), densified over the dimension's own
+        table with a zero where the operand has no row — the identity of the
+        sum it feeds (SPEC §8) — and ``cum_sum`` runs per combination of the
+        other dims in ``ord`` order, the declared coordinate order.
+
+        Terms never reach here: lowering refuses a variable-carrying operand,
+        so the guard speaks only to a hand-built plan.
+        """
+        if s.dimension not in p.dims:
+            raise LanguageError(
+                f"in {context}: cumulative sum over '{s.dimension}' but the expression has dims {list(p.dims)}"
+            )
+        if p.is_term:
+            raise LanguageError(
+                f'in {context}: CumulativeSum over a fragment carrying a variable — lowering refuses this'
+            )
+        others = [d for d in p.dims if d != s.dimension]
+        table = self.data.dimensions[s.dimension].select(pl.col('val').alias(s.dimension), pl.col('ord').alias(_ORD_IN))
+        collapsed = p.frame.group_by(list(p.dims)).agg(pl.col('cval').sum())
+        base = collapsed.select(others).unique().join(table, how='cross') if others else table
+        dense = (
+            base.join(collapsed, on=list(p.dims), how='left').with_columns(pl.col('cval').fill_null(0.0)).sort(_ORD_IN)
+        )
+        running = pl.col('cval').cum_sum()
+        frame = dense.with_columns(running.over(others) if others else running).select(*p.dims, 'cval')
+        return TermFragment(p.dims, frame, False)
 
     def _widen(self, presence: pl.LazyFrame, have: tuple[str, ...], want: tuple[str, ...]) -> pl.LazyFrame:
         """*presence* over every dim in *want*, saying the same thing.

@@ -52,9 +52,9 @@ _REFUSED = [
         'a helper that is not in the closed built-in set',
         {
             'constraints': {
-                'cumulative': {
+                'averaged': {
                     'foreach': ['snapshot'],
-                    'expression': 'cumsum(total_supply) <= load',
+                    'expression': 'mean(total_supply) <= load',
                 }
             }
         },
