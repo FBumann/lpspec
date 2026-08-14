@@ -28,14 +28,17 @@ if TYPE_CHECKING:
 class ColumnVectors:
     """The per-column vectors a solver sink is handed.
 
-    Three float vectors and an integrality mask, each as long as the model
-    has columns.
+    Three float vectors and two domain masks, each as long as the model has
+    columns. ``integral`` marks the binary and integer columns,
+    ``semi_continuous`` the zero-or-banded ones — disjoint, a column having
+    exactly one domain.
     """
 
     lb: npt.NDArray[np.float64]
     ub: npt.NDArray[np.float64]
     cost: npt.NDArray[np.float64]
     integral: npt.NDArray[np.bool_]
+    semi_continuous: npt.NDArray[np.bool_]
 
 
 @dataclass(frozen=True)
@@ -186,14 +189,15 @@ class ModelTables:
         every vector returned is freshly produced.
 
         **Nothing textual crosses into numpy**: a polars ``String`` converts by
-        boxing every value as a Python object, so the test against
-        ``'continuous'`` is made in polars and only its answer crosses — an
+        boxing every value as a Python object, so the tests against the type
+        names are made in polars and only their answers cross — an
         order of magnitude apart at the top of the ladder (#418).
         """
         prepared = self.cols.select(
             _finite(pl.col('lb'), infinity).alias('lb'),
             _finite(pl.col('ub'), infinity).alias('ub'),
-            (pl.col('vtype') != 'continuous').alias('integral'),
+            pl.col('vtype').is_in(('binary', 'integer')).alias('integral'),
+            (pl.col('vtype') == 'semi_continuous').alias('semi_continuous'),
         )
         cost = _scattered(self.column_count, self.obj['col'].to_numpy(), self.obj['coeff'].to_numpy(), 0.0)
         return ColumnVectors(
@@ -201,6 +205,7 @@ class ModelTables:
             ub=prepared['ub'].to_numpy(),
             cost=cost,
             integral=prepared['integral'].to_numpy(),
+            semi_continuous=prepared['semi_continuous'].to_numpy(),
         )
 
     def dense_rows(self, infinity: float) -> RowVectors:

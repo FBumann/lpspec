@@ -389,9 +389,9 @@ in the lane is order-free, which is what lets the query planner rearrange it.
 
 **The plan is affine-by-design.** No node introduces variables or constraints as
 a side effect of an expression; formulations are model *transformations*.
-Variable *types* are not formulations — binary/integer are a `vtype` column, LP
-`binary`/`general` sections and HiGHS integrality, which keeps basic MILP inside
-the streaming lane. **`sos:` is the same shape**: a `SosDeclaration` naming
+Variable *types* are not formulations — binary/integer/semi-continuous are a
+`vtype` column, LP `binary`/`general`/`semi-continuous` sections and HiGHS
+integrality, which keeps basic MILP inside the streaming lane. **`sos:` is the same shape**: a `SosDeclaration` naming
 columns the variable already made, one more stream out of the engine, and no
 expression node — which is why a set can be carried whole to a sink that has
 the concept. Reimplementing linopy's reformulation passes inside the plan is
@@ -410,7 +410,7 @@ the engine holds. The bare-install CI job runs the suite with neither present.
 **Sinks are capped, explicitly.** Four streams and no more: `cols` (bounds,
 objective coefficients, integrality), `rows`, `A` in CSR, and `sos` — the
 special-ordered sets, `(set, type, col, weight, big_m)`. The upgrade path from
-here is `genconstr`, plus a semi-continuous threshold on `cols`.
+here is `genconstr`.
 
 **The fourth is the one that lands unevenly**, because its destination differs
 per sink (see "Capability is not the ceiling"). So a solver **declares** how it

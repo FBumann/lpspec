@@ -251,6 +251,14 @@ def test_latex_binary_and_integer_variables_state_their_domain():
     assert r'\in \mathbb{Z}' in tex
 
 
+def test_latex_a_semi_continuous_variable_states_its_zero_or_banded_domain():
+    model = override(
+        DISPATCH,
+        **{'variables.p.domain': 'semi_continuous', 'variables.p.bounds': {'lower': 10, 'upper': 100}},
+    )
+    assert r'p_{t,g} & \in \{0\} \cup [10, 100]' in to_latex(model)
+
+
 def test_latex_sum_renders_the_coordinate_map_as_a_set_condition():
     tex = to_latex('examples/transport.yaml', legend=False)
     assert r'\sum_{g \in \mathcal{G} \,:\, \mathrm{bus}(g) = b} p_{t,g}' in tex

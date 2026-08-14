@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 ConstraintSense = Literal['==', '<=', '>=']
 ObjectiveSense = Literal['min', 'max']
 ComparisonOperator = Literal['==', '!=', '<=', '>=', '<', '>']
-VariableType = Literal['continuous', 'binary', 'integer']
+VariableType = Literal['continuous', 'binary', 'integer', 'semi_continuous']
 
 
 # --------------------------------------------------------------------------

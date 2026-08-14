@@ -369,6 +369,12 @@ class Walk:
 
             if block.domain == 'binary':
                 left, right = symbol, f'{self.op("in")} {self.op("binary_set")}'
+            elif block.domain == 'semi_continuous':
+                left = symbol
+                right = (
+                    f'{self.op("in")} {self.op("zero_set")} {self.op("union")} '
+                    f'[{self._bound(ctx, lower)}, {self._bound(ctx, upper)}]'
+                )
             else:
                 below, above = lower == float('-inf'), upper == float('inf')
                 if below and above:

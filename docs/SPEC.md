@@ -167,7 +167,7 @@ default `float`.
 | `foreach` | list[str] | required — dim signature, one variable per coordinate |
 | `where` | str or null | `null` — §6; variables exist only where true |
 | `bounds.lower` / `.upper` | number or parameter name | `-inf` / `inf` |
-| `domain` | str | `continuous`; or `integer`, or `binary` — which carries fixed 0/1 bounds |
+| `domain` | str | `continuous`; or `integer`, `binary` — which carries fixed 0/1 bounds — or `semi_continuous` |
 
 Omitting a bound means unbounded on that side — non-negativity is written, not
 assumed. Bounds are
@@ -175,6 +175,14 @@ a *narrower* language than expressions (a name or a number, never arithmetic) an
 the error says so rather than reporting a parse failure; expressions there are
 [#31](https://github.com/fluxopt/lpspec/issues/31). A bound parameter's dims must
 not exceed `foreach`.
+
+**`domain: semi_continuous`** makes the variable *zero, or between its declared
+bounds* — nothing in between: the unit-commitment shape, said without the
+auxiliary binary and big-M pair it otherwise costs. Its lower bound must be a
+positive, finite number — zero or absent is ordinary continuous, and a
+parameter there is not supported yet, both refused at load. A semi-integer
+domain is deliberately not exposed
+([#383](https://github.com/fluxopt/lpspec/issues/383)).
 
 **Equal bounds pin a variable**, which is how one declaration covers a quantity
 that is a decision in one model and data in another: bind `lower` and `upper` to

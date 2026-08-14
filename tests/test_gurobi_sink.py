@@ -55,6 +55,21 @@ MIP = {
     'objectives': {'o': {'sense': 'maximize', 'expression': 'sum(x * w, over=i)'}},
 }
 
+#: The optimum parks the semi-continuous variable at exactly 0 — infeasible
+#: were its lower bound of 10 ordinary, and cheaper to run it at 5 were the
+#: bound all there is — so agreement here is agreement on the zero-or-banded
+#: semantics, not on the domain parsing.
+SEMI = {
+    'dimensions': {'one': {'dtype': 'int', 'values': [0]}},
+    'parameters': {'load': {'dims': ['one']}},
+    'variables': {
+        'p': {'foreach': ['one'], 'bounds': {'lower': 10, 'upper': 100}, 'domain': 'semi_continuous'},
+        'q': {'foreach': ['one'], 'bounds': {'lower': 0, 'upper': 100}},
+    },
+    'constraints': {'balance': {'foreach': ['one'], 'expression': 'p + q == load'}},
+    'objectives': {'c': {'sense': 'minimize', 'expression': 'sum(p + 5 * q, over=one)'}},
+}
+
 INFEASIBLE = {
     'dimensions': {'t': {'dtype': 'int', 'values': [0]}},
     'parameters': {'load': {'dims': ['t']}},
@@ -81,6 +96,7 @@ CASES: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
             'cap': pl.DataFrame({'one': [0], 'value': [5.0]}),
         },
     ),
+    'SEMI': (SEMI, {'load': pl.DataFrame({'one': [0], 'value': [5.0]})}),
     'INFEASIBLE': (INFEASIBLE, {'load': pl.DataFrame({'t': [0], 'value': [99.0]})}),
 }
 
@@ -91,7 +107,8 @@ CASES: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
 
 
 @pytest.mark.parametrize(
-    ('name', 'variable', 'constraint'), [('LP', 'p', 'meet'), ('MAX', 'p', 'lim'), ('MIP', 'x', None)]
+    ('name', 'variable', 'constraint'),
+    [('LP', 'p', 'meet'), ('MAX', 'p', 'lim'), ('MIP', 'x', None), ('SEMI', 'p', None)],
 )
 def test_gurobi_and_highs_agree(name: str, variable: str, constraint: str | None) -> None:
     """The claim the second solver has to earn, on all three quantities.

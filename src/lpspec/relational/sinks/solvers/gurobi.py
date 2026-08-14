@@ -197,11 +197,11 @@ def _built(
     else is affected: an environment's parameters are the defaults of every
     model built on it. ``OutputFlag`` leads so a caller can put the log back.
 
-    ``vtype`` is passed only when some column is integral — an LP otherwise
-    pays a double-digit percentage of the column hand-off for an array of one
-    repeated letter (#434), and linopy skips it the same way. ``batch_rows``
-    goes straight through un-defaulted: one call unless a caller asks
-    otherwise (#434).
+    ``vtype`` is passed only when some column is not continuous — an LP
+    otherwise pays a double-digit percentage of the column hand-off for an
+    array of one repeated letter (#434), and linopy skips it the same way.
+    ``batch_rows`` goes straight through un-defaulted: one call unless a
+    caller asks otherwise (#434).
     """
     gurobipy = _gurobipy()
     import numpy as np
@@ -211,7 +211,11 @@ def _built(
     m = gurobipy.Model(env=environment)
 
     cols = model.dense_columns(gurobipy.GRB.INFINITY)
-    discrete: dict[str, Any] = {'vtype': np.where(cols.integral, 'I', 'C')} if cols.integral.any() else {}
+    discrete: dict[str, Any] = (
+        {'vtype': np.select([cols.integral, cols.semi_continuous], ['I', 'S'], 'C')}
+        if cols.integral.any() or cols.semi_continuous.any()
+        else {}
+    )
     x = m.addMVar(model.column_count, lb=cols.lb, ub=cols.ub, obj=cols.cost, **discrete)
 
     rows = model.dense_rows(gurobipy.GRB.INFINITY)

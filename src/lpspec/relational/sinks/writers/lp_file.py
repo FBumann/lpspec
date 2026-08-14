@@ -59,6 +59,10 @@ def write_lp_file(model: ModelTables, path: str | Path) -> None:
     ``cols`` is positional, so the bounds section's index is added inside the
     streamed pipeline. The constraint section goes out one row range at a time,
     since a chunk's rendered lines are held until it is sunk.
+
+    ``semi-continuous`` is linopy's spelling of the section; HiGHS's reader
+    accepts it beside its own ``semi``, so a file this writes and one the
+    eager lane writes are read by the same parsers.
     """
     path = Path(path)
     objective = model.obj.lazy().sort('col').select(_term(pl.col('coeff'), pl.col('col')))
@@ -89,7 +93,8 @@ def write_lp_file(model: ModelTables, path: str | Path) -> None:
         f.write(b'\nbounds\n')
         _sink(bounds, f)
 
-        for variable_type, keyword in (('binary', 'binary'), ('integer', 'general')):
+        sections = (('binary', 'binary'), ('integer', 'general'), ('semi_continuous', 'semi-continuous'))
+        for variable_type, keyword in sections:
             chosen = model.cols.lazy().with_row_index('col').filter(pl.col('vtype') == variable_type)
             if chosen.select(pl.len()).collect().item() == 0:
                 continue

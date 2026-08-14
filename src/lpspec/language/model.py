@@ -79,7 +79,7 @@ DIMENSION_DTYPES = frozenset({'float', 'int', 'str', 'datetime'})
 #: The domains a variable may declare (SPEC §2). Matches the plan's
 #: ``VariableType`` vocabulary (``relational/plan.py``), pinned by a test for
 #: the same fence reason as the dtype table above.
-VARIABLE_DOMAINS = frozenset({'continuous', 'integer', 'binary'})
+VARIABLE_DOMAINS = frozenset({'continuous', 'integer', 'binary', 'semi_continuous'})
 
 
 def _one_of(value: str, allowed: frozenset[str] | set[str], field: str) -> str:
@@ -219,6 +219,31 @@ class VariableBlock(_StrictBlock):
     @classmethod
     def _check_domain(cls, v: str) -> str:
         return _one_of(v, VARIABLE_DOMAINS, 'domain')
+
+    @model_validator(mode='after')
+    def _check_semi_continuous_lower(self) -> VariableBlock:
+        """A semi-continuous variable needs a lower bound that means something.
+
+        The rule is linopy's own — ``add_variables`` refuses anything but a
+        positive scalar for ``semi_continuous`` — copied so the two lanes keep
+        saying the same thing.
+        """
+        if self.domain != 'semi_continuous':
+            return self
+        lower = self.bounds.lower
+        if isinstance(lower, str):
+            msg = (
+                'A semi-continuous lower bound must be a number; a parameter there is not '
+                'supported yet. Write the threshold into the file, or drop the domain.'
+            )
+            raise ValueError(msg)
+        if lower <= 0 or math.isinf(lower):
+            msg = (
+                f'A semi-continuous variable with lower bound {lower:g} is ordinary continuous; '
+                f'give it a positive, finite lower bound or drop the domain.'
+            )
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode='before')
     @classmethod

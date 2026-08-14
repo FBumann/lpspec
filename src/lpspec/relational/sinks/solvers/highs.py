@@ -110,9 +110,15 @@ def build_highs(
             h.addCols(hi - lo, cols.cost[lo:hi], cols.lb[lo:hi], cols.ub[lo:hi], 0, empty_i, empty_i, empty_f),
             'a batch of columns',
         )
-        noncontinuous = np.flatnonzero(cols.integral[lo:hi]).astype(np.int32) + np.int32(lo)
+        noncontinuous = np.flatnonzero(cols.integral[lo:hi] | cols.semi_continuous[lo:hi]).astype(np.int32) + np.int32(
+            lo
+        )
         if len(noncontinuous):
-            integrality = np.full(len(noncontinuous), int(highspy.HighsVarType.kInteger), dtype=np.uint8)
+            integrality = np.where(
+                cols.semi_continuous[noncontinuous],
+                np.uint8(int(highspy.HighsVarType.kSemiContinuous)),
+                np.uint8(int(highspy.HighsVarType.kInteger)),
+            )
             h.changeColsIntegrality(len(noncontinuous), noncontinuous, integrality)
 
     rlb, rub = _row_bounds(model.dense_rows(inf), inf)

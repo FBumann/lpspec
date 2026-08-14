@@ -75,7 +75,7 @@ COO matrix is swapping two column names.
 dense intermediate, and a hand-off straight to the solver rather than through a
 file; parameterised `macros:` ([Calliope](design/prior-art.md)'s sub-expressions
 take no arguments);
-binary and integer variables; piecewise as N links with per-link signs, convex
+binary, integer and semi-continuous variables; piecewise as N links with per-link signs, convex
 mode and `active` gating; load-time validation of every expression, `where`
 string and *uncalled* macro template.
 
@@ -83,10 +83,9 @@ string and *uncalled* macro template.
 (labelled DataArrays vs tidy tables — `to_dataarray` bridges), debugging (IIS
 via Gurobi, `print()` of a row), lifecycle (mutate, re-solve, warm start,
 `relax`/`fix`), solver breadth (ten backends and four handoffs vs HiGHS-direct
-plus LP files), and the variable types and capabilities behind the capability
-model.
+plus LP files), and the capabilities behind the capability model.
 
 **The ranking this implies:** indexed access blocks whole model classes today;
 the operational verbs block using the engine at 3am; solver breadth blocks
-arrival from linopy at all; semi-continuous and `cumsum`-over-data are cheap,
+arrival from linopy at all; `cumsum`-over-data is cheap,
 unblocked and unscheduled.

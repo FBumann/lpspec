@@ -148,6 +148,7 @@ def _build_variables(ctx: EvaluationContext) -> None:
                 mask=_as_linopy_mask(mask),
                 binary=vdef.domain == 'binary',
                 integer=vdef.domain == 'integer',
+                semi_continuous=vdef.domain == 'semi_continuous',
             )
 
 

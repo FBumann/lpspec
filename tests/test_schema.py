@@ -106,6 +106,28 @@ def test_invalid_domain():
         Model.model_validate({'dimensions': {'x': {'values': [1], 'dtype': 'int'}}, 'variables': {'v': body}})
 
 
+@pytest.mark.parametrize(
+    ('bounds', 'match'),
+    [
+        pytest.param({'lower': 0, 'upper': 9}, 'ordinary continuous', id='zero-lower'),
+        pytest.param({'lower': -3, 'upper': 9}, 'ordinary continuous', id='negative-lower'),
+        pytest.param({'upper': 9}, 'ordinary continuous', id='missing-lower'),
+        pytest.param({'lower': 'p_min', 'upper': 9}, 'must be a number', id='parameter-lower'),
+    ],
+)
+def test_a_semi_continuous_lower_bound_must_be_a_positive_number(bounds, match):
+    """linopy's own contract for ``semi_continuous``, mirrored so both lanes refuse alike."""
+    body = {'foreach': ['x'], 'domain': 'semi_continuous', 'bounds': bounds}
+    with pytest.raises(SchemaError, match=match):
+        Model.model_validate(
+            {
+                'dimensions': {'x': {'values': [1], 'dtype': 'int'}},
+                'parameters': {'p_min': {'dims': ['x']}},
+                'variables': {'v': body},
+            }
+        )
+
+
 def test_invalid_sense():
     with pytest.raises(SchemaError, match=r'minimize|maximize'):
         Model.model_validate({'objectives': {'obj': {'sense': 'unknown', 'expression': 'v'}}})

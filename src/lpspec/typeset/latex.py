@@ -70,6 +70,8 @@ class LatexFormat:
         'reals': r'\mathbb{R}',
         'integers': r'\mathbb{Z}',
         'binary_set': r'\{0, 1\}',
+        'zero_set': r'\{0\}',
+        'union': r'\cup',
         'sos_set': r'\mathrm{SOS}',
         'minimize': r'\min',
         'maximize': r'\max',
