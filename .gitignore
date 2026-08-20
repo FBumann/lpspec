@@ -20,6 +20,9 @@ uv.lock
 
 # generated benchmark inputs (regenerated deterministically from bench/cases.py;
 # the results JSONL under bench/results/ *is* tracked — that is the provenance)
+# ...except an A/B run's scratch samples, which describe one laptop for one
+# afternoon and answer a question that is over once it is answered.
+bench/results/ab/
 bench/.cache/
 # pytest-benchmark's run store; baselines to compare against are chosen by
 # number at the command line, not committed
